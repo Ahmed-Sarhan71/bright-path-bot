@@ -3,7 +3,7 @@ import hmac
 import json
 import logging
 import os
-
+import re
 import httpx
 from fastapi import APIRouter, BackgroundTasks, HTTPException, Request
 from fastapi.responses import PlainTextResponse
@@ -22,8 +22,17 @@ UNSUPPORTED = (
 )
 
 
+def to_whatsapp_format(text: str) -> str:
+    """Turn common Markdown into WhatsApp formatting (WhatsApp bold is *one* asterisk)."""
+    text = re.sub(r"\*\*(.+?)\*\*", r"*\1*", text, flags=re.DOTALL)
+    text = re.sub(r"__(.+?)__", r"*\1*", text, flags=re.DOTALL)
+    text = re.sub(r"^#{1,6}\s*(.+)$", r"*\1*", text, flags=re.MULTILINE)
+    text = re.sub(r"^\s*[-*]\s+", "• ", text, flags=re.MULTILINE)
+    return text
+
 def send_text(to: str, body: str) -> None:
     """Send a WhatsApp text message through Meta's Cloud API."""
+    body = to_whatsapp_format(body)
     version = os.getenv("WHATSAPP_API_VERSION", "v23.0")
     url = f"https://graph.facebook.com/{version}/{os.environ['WHATSAPP_PHONE_NUMBER_ID']}/messages"
     response = httpx.post(
