@@ -1,6 +1,7 @@
 import json
 import os
 import sqlite3
+import time
 from contextlib import closing
 
 
@@ -40,6 +41,64 @@ def init_db() -> None:
             )
             """
         )
+        # Chats where a human has taken over: the bot stays quiet until paused_until.
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS handover (
+                session_id   TEXT PRIMARY KEY,
+                paused_until REAL NOT NULL
+            )
+            """
+        )
+        # Ids of messages the bot sent itself, so they are never mistaken for a human reply.
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS sent_messages (
+                message_id TEXT PRIMARY KEY,
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            )
+            """
+        )
+
+
+def pause_bot(session_id: str, hours: float) -> None:
+    """Silence the bot in this chat for the next `hours` hours."""
+    with closing(_connect()) as conn, conn:
+        conn.execute(
+            """
+            INSERT INTO handover (session_id, paused_until) VALUES (?, ?)
+            ON CONFLICT(session_id) DO UPDATE SET paused_until = excluded.paused_until
+            """,
+            (session_id, time.time() + hours * 3600),
+        )
+
+
+def is_paused(session_id: str) -> bool:
+    with closing(_connect()) as conn:
+        row = conn.execute(
+            "SELECT paused_until FROM handover WHERE session_id = ?", (session_id,)
+        ).fetchone()
+    return row is not None and row[0] > time.time()
+
+
+def record_sent(message_id: str) -> None:
+    with closing(_connect()) as conn, conn:
+        conn.execute("INSERT OR IGNORE INTO sent_messages (message_id) VALUES (?)", (message_id,))
+
+
+def was_sent_by_bot(message_id: str) -> bool:
+    with closing(_connect()) as conn:
+        row = conn.execute(
+            "SELECT 1 FROM sent_messages WHERE message_id = ?", (message_id,)
+        ).fetchone()
+    return row is not None
+
+
+def add_message(session_id: str, role: str, content: str) -> None:
+    """Append one message to a session's history without calling the AI."""
+    session = get_session(session_id)
+    session["messages"].append({"role": role, "content": content})
+    save_session(session_id, session)
 
 
 def claim_message(message_id: str) -> bool:

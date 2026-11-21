@@ -13,6 +13,7 @@ from pydantic import BaseModel  # noqa: E402
 
 from context import build_system_message  # noqa: E402
 import db  # noqa: E402
+from notify import send_push  # noqa: E402
 from sheets import save_enquiry  # noqa: E402
 from privacy import router as privacy_router  # noqa: E402
 from whatsapp import build_router  # noqa: E402
@@ -56,8 +57,30 @@ TOOLS = [
                 "required": ["name", "phone", "course"],
             },
         },
-    }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "notify_team",
+            "description": (
+                "Alert the team on their phone when the person asks something you cannot "
+                "answer from the center information. Call it once per unanswered question."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "question": {"type": "string", "description": "The person's question, in their words"},
+                    "name": {"type": "string", "description": "Person's name, if known"},
+                    "phone": {"type": "string", "description": "Person's phone number, if known"},
+                },
+                "required": ["question"],
+            },
+        },
+    },
 ]
+
+# Stops a chatty person from flooding the team's phone.
+MAX_ALERTS_PER_SESSION = 3
 
 # Sessions are stored in SQLite, so they survive restarts.
 db.init_db()
@@ -80,8 +103,51 @@ class ChatResponse(BaseModel):
     reply: str
 
 
+def alerts_sent(session: dict) -> int:
+    """How many notify_team calls this chat has made so far (counted from the history)."""
+    return sum(
+        1
+        for m in session["messages"]
+        if m.get("role") == "assistant"
+        for tc in (m.get("tool_calls") or [])
+        if tc.get("function", {}).get("name") == "notify_team"
+    )
+
+
+def run_notify_team(session: dict, call) -> str:
+    if alerts_sent(session) > MAX_ALERTS_PER_SESSION:  # the current call is already in the history
+        return "The team was already alerted. Just tell the person a team member will follow up."
+    try:
+        args = json.loads(call.function.arguments)
+        question = str(args["question"])
+    except (ValueError, KeyError):
+        return "Error: missing question."
+
+    lines = [f"Question: {question}"]
+    if args.get("name"):
+        lines.append(f"Name: {args['name']}")
+    if args.get("phone"):
+        lines.append(f"Phone: {args['phone']}")
+
+    url = url_title = None
+    session_id = session.get("id", "")
+    if session_id.startswith("wa:"):
+        number = session_id[3:]
+        lines.append(f"WhatsApp: +{number}")
+        url, url_title = f"https://wa.me/{number}", "Open WhatsApp chat"
+    else:
+        lines.append("Channel: web chat")
+
+    sent = send_push("Bright Path: unanswered question", "\n".join(lines), url, url_title)
+    if not sent:
+        return "The alert could not be sent. Still tell the person a team member will follow up."
+    return "The team was alerted. Tell the person a team member will follow up."
+
+
 def run_tool(session: dict, call) -> str:
     """Run a tool the AI asked for and return a result string for the AI."""
+    if call.function.name == "notify_team":
+        return run_notify_team(session, call)
     if call.function.name != "save_enquiry":
         return "Unknown tool."
     if session["saved"]:
@@ -104,6 +170,7 @@ def health():
 def reply_to(session_id: str, text: str) -> str:
     """Load the session, get the AI's reply, and save the session. Used by web chat and WhatsApp."""
     session = db.get_session(session_id)
+    session["id"] = session_id  # lets tools know which chat this is
     try:
         return answer(session, text).reply
     finally:
@@ -152,4 +219,6 @@ def answer(session: dict, text: str) -> ChatResponse:
 
 # WhatsApp webhook (GET to verify, POST for incoming messages).
 app.include_router(build_router(reply_to))
+
+# Privacy policy page (Meta requires a policy URL to publish the app).
 app.include_router(privacy_router)
