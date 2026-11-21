@@ -14,6 +14,7 @@ from pydantic import BaseModel  # noqa: E402
 from context import build_system_message  # noqa: E402
 import db  # noqa: E402
 from sheets import save_enquiry  # noqa: E402
+from privacy import router as privacy_router  # noqa: E402
 from whatsapp import build_router  # noqa: E402
 
 logger = logging.getLogger("bright-path")
@@ -151,3 +152,4 @@ def answer(session: dict, text: str) -> ChatResponse:
 
 # WhatsApp webhook (GET to verify, POST for incoming messages).
 app.include_router(build_router(reply_to))
+app.include_router(privacy_router)
