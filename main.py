@@ -16,6 +16,7 @@ import db  # noqa: E402
 from notify import send_push  # noqa: E402
 from sheets import save_enquiry  # noqa: E402
 from privacy import router as privacy_router  # noqa: E402
+from takeover import make_link, router as takeover_router  # noqa: E402
 from whatsapp import build_router  # noqa: E402
 
 logger = logging.getLogger("bright-path")
@@ -134,7 +135,12 @@ def run_notify_team(session: dict, call) -> str:
     if session_id.startswith("wa:"):
         number = session_id[3:]
         lines.append(f"WhatsApp: +{number}")
-        url, url_title = f"https://wa.me/{number}", "Open WhatsApp chat"
+        link = make_link(number)
+        if link:
+            # One tap: pauses the bot for this customer, then opens their WhatsApp chat.
+            url, url_title = link, "Take over chat (pauses bot)"
+        else:
+            url, url_title = f"https://wa.me/{number}", "Open WhatsApp chat"
     else:
         lines.append("Channel: web chat")
 
@@ -222,3 +228,6 @@ app.include_router(build_router(reply_to))
 
 # Privacy policy page (Meta requires a policy URL to publish the app).
 app.include_router(privacy_router)
+
+# Link in the Pushover alert that pauses the bot and opens the customer's chat.
+app.include_router(takeover_router)
