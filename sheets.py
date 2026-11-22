@@ -1,3 +1,4 @@
+import base64
 import json
 import os
 from datetime import datetime
@@ -12,9 +13,13 @@ def _get_worksheet():
     """Connect to the Google Sheet once and reuse the connection."""
     global _worksheet
     if _worksheet is None:
-        # On Railway there is no credentials file, so the JSON is passed as an env variable.
+        # On Railway there is no credentials file, so the key is passed as an env variable:
+        # GOOGLE_CREDENTIALS_B64 (base64, safest) or GOOGLE_CREDENTIALS_JSON (raw JSON).
+        creds_b64 = os.environ.get("GOOGLE_CREDENTIALS_B64")
         creds_json = os.environ.get("GOOGLE_CREDENTIALS_JSON")
-        if creds_json:
+        if creds_b64:
+            gc = gspread.service_account_from_dict(json.loads(base64.b64decode(creds_b64)))
+        elif creds_json:
             gc = gspread.service_account_from_dict(json.loads(creds_json))
         else:
             gc = gspread.service_account(filename=os.environ["GOOGLE_CREDENTIALS_FILE"])
