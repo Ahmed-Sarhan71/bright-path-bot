@@ -27,9 +27,33 @@ def _get_worksheet():
     return _worksheet
 
 
-def save_enquiry(name: str, phone: str, course: str) -> None:
-    """Add one enquiry as a new row. Columns: Timestamp, Name, Phone, Course, Registered."""
+def save_enquiry(name: str, phone: str, course: str, language: str = "", whatsapp: str = "") -> None:
+    """Add one enquiry as a new row.
+
+    Columns: Timestamp, Name, Phone, Course, Registered, Language, WhatsApp, Follow-up sent.
+    """
     timestamp = datetime.now(ZoneInfo("Asia/Dubai")).strftime("%Y-%m-%d %H:%M:%S")
-    row = [timestamp, name, phone, course, "No"]
+    row = [timestamp, name, phone, course, "No", language, whatsapp, ""]
     # RAW keeps the phone number as text, so "+971..." is not turned into a formula.
     _get_worksheet().append_row(row, value_input_option="RAW")
+
+
+def pending_rows() -> list[dict]:
+    """All enquiry rows as dicts keyed by the header names, plus the sheet row number."""
+    values = _get_worksheet().get_all_values()
+    if not values:
+        return []
+    header = [h.strip() for h in values[0]]
+    rows = []
+    for number, cells in enumerate(values[1:], start=2):
+        row = {h: (cells[i].strip() if i < len(cells) else "") for i, h in enumerate(header)}
+        row["_row"] = number
+        rows.append(row)
+    return rows
+
+
+def mark_followup(row_number: int, value: str) -> None:
+    """Write into the 'Follow-up sent' column of one row."""
+    ws = _get_worksheet()
+    column = [h.strip() for h in ws.row_values(1)].index("Follow-up sent") + 1
+    ws.update_cell(row_number, column, value)
